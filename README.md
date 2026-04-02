@@ -30,7 +30,7 @@ This reveals that infectious disease presents another environment that can be ch
 
 How well is the FluSight ensemble calibrated to predicting tail events? It turns out that the model appears to be tail *probabilistically* calibrated when focusing on the 2023-24 and 2024-25 seasons. 
 
-| <img src="images/diagnostic_plots/tail_calibration_FluSight-ensemble.png" width="600"> |
+| <img src="assets/tail_calibration_FluSight-ensemble.png" width="600"> |
 |:---:|
 
 <sub>**Figure**: Combined (L), severity ratio (M), and occurrence ratio (R) of FluSight ensemble model for the 2023-24 and 2024-25 season with respect to the weekly incidence of flu hospitalizations, aggregated across all states.</sub> 
