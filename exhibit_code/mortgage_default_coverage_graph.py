@@ -123,7 +123,7 @@ fig.text(0.70, -0.04,
          ha='center', fontsize=12, color='#555')
 
 plt.tight_layout()
-plt.savefig('./images/descriptive/mortgage_default_coverage.png', dpi=150, bbox_inches='tight',
+plt.savefig('./assets/mortgage_default_coverage.png', dpi=150, bbox_inches='tight',
             facecolor='white')
 plt.show()
 

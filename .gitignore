@@ -11,3 +11,6 @@ wheels/
 .cache*
 .flusight_data_cache*
 .DS_Store
+
+# Images 
+/images*

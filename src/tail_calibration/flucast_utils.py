@@ -29,14 +29,23 @@ DEFAULT_FILTERS = {
 }
 
 def _make_cache_key(filters: dict) -> str:
+    """Generate a stable MD5 hash string from a filter dict, used as the cache filename.
+
+    Args:
+        filters: Validated filter dict (output of _validate_filters).
+    """
     serialized = json.dumps(filters, sort_keys=True)
     return hashlib.md5(serialized.encode()).hexdigest()
 
 def _validate_filters(filters: Optional[dict]) -> dict:
-    """
-    Validate and normalise the top-level filter dict.
-    Each top-level key must be in VALID_FILTER_KEYS.
-    Each inner value must be a list (or convertible to one).
+    """Validate and normalise the top-level filter dict.
+
+    Each top-level key must be a dataset name in VALID_FILTER_KEYS.
+    Each inner value must be a list (or will be coerced into one).
+    Missing dataset keys are filled in from DEFAULT_FILTERS.
+
+    Args:
+        filters: Dict mapping dataset name -> {column: values}. Pass None to use DEFAULT_FILTERS.
     """
     if filters is None:
         return DEFAULT_FILTERS
@@ -84,6 +93,12 @@ def _validate_filters(filters: Optional[dict]) -> dict:
 
 
 def _apply_pandas_filters(df: pd.DataFrame, col_filters: dict) -> pd.DataFrame:
+    """Filter a DataFrame by isin checks on one or more columns.
+
+    Args:
+        df: DataFrame to filter.
+        col_filters: Dict mapping column name -> list of allowed values.
+    """
     mask = pd.Series(True, index=df.index)
     for col, values in col_filters.items():
         if col not in df.columns:
@@ -93,7 +108,11 @@ def _apply_pandas_filters(df: pd.DataFrame, col_filters: dict) -> pd.DataFrame:
 
 
 def _build_pyarrow_filter(col_filters: dict):
-    """Build a PyArrow filter expression from a col→list dict."""
+    """Build a PyArrow filter expression from a col→list dict.
+
+    Args:
+        col_filters: Dict mapping column name -> list of allowed values.
+    """
     expr = None
     for col, values in col_filters.items():
         if col == "horizon":
@@ -108,6 +127,14 @@ def _build_pyarrow_filter(col_filters: dict):
 # ── main loader ───────────────────────────────────────────────────────────────
 
 def load_flusight_data(filters: Optional[dict] = None, refresh: bool = False):
+    """Load FluSight forecast, time-series, and oracle data from S3, with local pickle caching.
+
+    Returns a tuple of (time_series, oracle, forecasts) as DataFrames.
+
+    Args:
+        filters: Optional filter dict (see _validate_filters). Defaults to DEFAULT_FILTERS.
+        refresh: If True, delete any existing cache and re-fetch from S3.
+    """
     validated = _validate_filters(filters)
     cache_key = _make_cache_key(validated)
 
@@ -168,10 +195,21 @@ def load_flusight_data(filters: Optional[dict] = None, refresh: bool = False):
 
 
 
-def uniquely_identified(df:pd.DataFrame, by:list[str]) -> bool:
+def uniquely_identified(df: pd.DataFrame, by: list[str]) -> bool:
+    """Return True if the given columns uniquely identify every row in df.
+
+    Args:
+        df: DataFrame to check.
+        by: List of column names forming the candidate key.
+    """
     return df.duplicated(subset=by).sum() == 0
 
 def widen(forecast_df: pd.DataFrame) -> pd.DataFrame:
+    """Pivot a long-format forecast DataFrame to wide format with one quantile column per level.
+
+    Args:
+        forecast_df: Long-format DataFrame with output_type_id and value columns.
+    """
     forecasts_wide = forecast_df.pivot_table(
         index=[c for c in forecast_df.columns if c not in ["output_type", "output_type_id", "value"]],
         columns="output_type_id",
@@ -183,10 +221,13 @@ def widen(forecast_df: pd.DataFrame) -> pd.DataFrame:
     return forecasts_wide
 
 def filter_dates(oracle_df: pd.DataFrame, date_ranges: dict[tuple[str, str], str]) -> pd.DataFrame:
-    """
-    date_ranges: { (start, end): asof, ... }
-    e.g. { ("2023-10-01", "2024-05-01"): "2024-05-15",
-           ("2024-10-01", "2025-05-01"): "2025-05-15" }
+    """Filter oracle data to specific season windows matched by as_of date.
+
+    Args:
+        oracle_df: Oracle DataFrame with target_end_date and as_of columns.
+        date_ranges: Maps (start, end) date strings -> as_of date string.
+            Each entry selects rows where target_end_date is in [start, end]
+            and as_of equals the specified snapshot date.
     """
     masks = []
     for (start, end), asof in date_ranges.items():
@@ -201,7 +242,13 @@ def filter_dates(oracle_df: pd.DataFrame, date_ranges: dict[tuple[str, str], str
     return combined
 
 
-def merge_and_process(forecasts:pd.DataFrame, oracle:pd.DataFrame) -> pd.DataFrame:
+def merge_and_process(forecasts: pd.DataFrame, oracle: pd.DataFrame) -> pd.DataFrame:
+    """Merge forecasts with oracle data and pivot to wide format.
+
+    Args:
+        forecasts: Long-format forecast DataFrame.
+        oracle: Oracle DataFrame uniquely identified by target, target_end_date, location.
+    """
     assert uniquely_identified(oracle, by=["target", "target_end_date", "location"])
     assert uniquely_identified(forecasts, by=["target", "target_end_date", "location", "horizon", "model_id", "output_type_id"])
     merged = forecasts.merge(oracle, on=["target", "target_end_date", "location"], how="left")
@@ -209,10 +256,18 @@ def merge_and_process(forecasts:pd.DataFrame, oracle:pd.DataFrame) -> pd.DataFra
     return merged_wide
 
 
-def build_evaluation_df(forecasts:pd.DataFrame, 
-                        oracle:pd.DataFrame, 
+def build_evaluation_df(forecasts: pd.DataFrame,
+                        oracle: pd.DataFrame,
                         date_ranges: dict[tuple[str, str], str],
-                        id_cols = ["target", "reference_date", "location", "horizon", "model_id"]) ->pd.DataFrame:
+                        id_cols = ["target", "reference_date", "location", "horizon", "model_id"]) -> pd.DataFrame:
+    """Build a wide evaluation DataFrame by filtering oracle dates and merging with forecasts.
+
+    Args:
+        forecasts: Long-format forecast DataFrame.
+        oracle: Oracle DataFrame.
+        date_ranges: Season windows passed to filter_dates.
+        id_cols: Columns that should uniquely identify each row in the result.
+    """
     filtered_oracle = filter_dates(oracle, date_ranges)
     evaluation_df = merge_and_process(forecasts, filtered_oracle)
     assert uniquely_identified(evaluation_df, by=id_cols)
@@ -224,6 +279,14 @@ def build_evaluation_dict(
     date_ranges: dict[tuple[str, str], str],
     model_id: list[str] = ['FluSight-ensemble'],
 ) -> dict[str, pd.DataFrame]:
+    """Build a dict mapping model ID -> evaluation DataFrame, one entry per requested model.
+
+    Args:
+        forecasts: Long-format forecast DataFrame.
+        oracle: Oracle DataFrame.
+        date_ranges: Season windows passed to filter_dates.
+        model_id: List of model IDs to include in the output dict.
+    """
     df = build_evaluation_df(forecasts, oracle, date_ranges)
     return {mid: df[df["model_id"] == mid].reset_index(drop=True) for mid in model_id}
 

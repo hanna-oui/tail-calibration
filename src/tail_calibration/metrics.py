@@ -5,15 +5,34 @@ from typing import Optional
 from tail_calibration.types import TailCalibrationTuple, p
 
 def assert_percentile(p: p) -> p:
+    """Validate that p is in [0, 100]. Returns p or raises ValueError.
+
+    Args:
+        p: Percentile value, must be in [0, 100].
+    """
     if 0 <= p <= 100:
         return p
     raise ValueError(f"Percentile {p} is out of range. Must be between 0 and 100.")
 
 def percentile_value(df: pd.DataFrame, oracle_col: str, p: p) -> float:
-    """p in [0, 100], e.g. p=90 for 90th percentile"""
+    """Return the p-th percentile of oracle_col. p in [0, 100], e.g. p=90 for 90th percentile.
+
+    Args:
+        df: DataFrame containing the oracle column.
+        oracle_col: Column name of the observed values.
+        p: Percentile in [0, 100].
+    """
     return df[oracle_col].quantile(assert_percentile(p) / 100)
 
 def compute_cdf_value(row: pd.Series, x: float, quantile_cols: list[str], quantile_levels: list[float]) -> float:
+    """Interpolate the CDF F(x) from a row's quantile values. Pads with -inf/inf at levels 0/1.
+
+    Args:
+        row: A single row containing forecast quantile values.
+        x: The point at which to evaluate the CDF.
+        quantile_cols: Column names corresponding to quantile forecasts.
+        quantile_levels: Probability levels (e.g. [0.1, 0.5, 0.9]) matching quantile_cols.
+    """
     input_values, input_levels= np.asarray(row[quantile_cols], dtype=np.float64), np.asarray(quantile_levels, dtype=np.float64)
     values, levels = np.concatenate([[-np.inf], input_values, [np.inf]]), np.concatenate([[0.0], input_levels, [1.0]])
     assert np.all(np.diff(values) >= 0), f"Quantile crossing detected: {values}"
@@ -21,29 +40,71 @@ def compute_cdf_value(row: pd.Series, x: float, quantile_cols: list[str], quanti
     return float(np.interp(x, values, levels))
 
 def parse_quantile_cols(df: pd.DataFrame, prefix: str = "quantile_") -> tuple[list[str], list[float]]:
+    """Extract quantile column names and their numeric levels, sorted by level.
+
+    Args:
+        df: DataFrame whose columns are searched for quantile columns.
+        prefix: Column name prefix identifying quantile columns.
+    """
     cols = [c for c in df.columns if c.startswith(prefix)]
     levels = [float(c.replace(prefix, "")) for c in cols]
     cols, levels = zip(*sorted(zip(cols, levels), key=lambda x: x[1]))
     return list(cols), list(levels)
 
 def threshold_CDF_values(df: pd.DataFrame, t: float, quantile_prefix: str = "quantile_") -> pd.Series:
+    """Compute F(t) for each row, where t is a fixed threshold.
+
+    Args:
+        df: DataFrame with quantile forecast columns.
+        t: The threshold value at which to evaluate the CDF.
+        quantile_prefix: Prefix identifying quantile columns.
+    """
     quantile_cols, quantile_levels = parse_quantile_cols(df, quantile_prefix)
     return df.apply(lambda row: compute_cdf_value(row, t, quantile_cols, quantile_levels), axis=1)
 
 def empirical_CDF_values(df: pd.DataFrame, oracle_col: str, quantile_prefix: str = "quantile_") -> pd.Series:
+    """Compute F(y) for each row, where y is the observed (oracle) value.
+
+    Args:
+        df: DataFrame with quantile forecast columns and an oracle column.
+        oracle_col: Column name of the observed values.
+        quantile_prefix: Prefix identifying quantile columns.
+    """
     quantile_cols, quantile_levels = parse_quantile_cols(df, quantile_prefix)
     return df.apply(lambda row: compute_cdf_value(row, row[oracle_col], quantile_cols, quantile_levels), axis=1)
 
 def left_limit_CDF_values(df: pd.DataFrame, oracle_col: str, quantile_prefix: str = "quantile_") -> pd.Series:
+    """Compute F(y-1) for each row. Used for randomized PIT on discrete data.
+
+    Args:
+        df: DataFrame with quantile forecast columns and an oracle column.
+        oracle_col: Column name of the observed values.
+        quantile_prefix: Prefix identifying quantile columns.
+    """
     quantile_cols, quantile_levels = parse_quantile_cols(df, quantile_prefix)
     return df.apply(lambda row: compute_cdf_value(row, row[oracle_col] - 1, quantile_cols, quantile_levels), axis=1)
 
 def above_threshold(df: pd.DataFrame, oracle_col: str, threshold: float) -> pd.DataFrame:
+    """Filter to rows where oracle > threshold. Asserts at least one row remains.
+
+    Args:
+        df: DataFrame containing the oracle column.
+        oracle_col: Column name of the observed values.
+        threshold: The threshold value; rows with oracle > threshold are kept.
+    """
     above = df[df[oracle_col] > threshold]
     assert len(above) > 0, "No observations above the threshold. Check the threshold value and oracle column."
     return above
 
 def threshold_cardinality(df: pd.DataFrame, oracle_col: str, p: Optional[float] = None, t: Optional[float] = None) -> int:
+    """Count observations above threshold. Specify either percentile p or absolute threshold t.
+
+    Args:
+        df: DataFrame containing the oracle column.
+        oracle_col: Column name of the observed values.
+        p: Percentile in [0, 100]; threshold is derived from oracle_col's p-th percentile.
+        t: Absolute threshold value. Exactly one of p or t must be provided.
+    """
     assert (p is not None) ^ (t is not None), "Must specify exactly one of p or t"
     if p is not None:
         threshold = percentile_value(df, oracle_col, assert_percentile(p))
@@ -53,17 +114,35 @@ def threshold_cardinality(df: pd.DataFrame, oracle_col: str, p: Optional[float] 
     return len(above_threshold(df, oracle_col, threshold))
     
 def survival_probabilities(df: pd.DataFrame, t: float, quantile_prefix: str = "quantile_") -> pd.Series:
+    """Compute 1 - F(t) for each row (predicted probability of exceeding t).
+
+    Args:
+        df: DataFrame with quantile forecast columns.
+        t: The threshold value.
+        quantile_prefix: Prefix identifying quantile columns.
+    """
     quantile_cols, quantile_levels = parse_quantile_cols(df, quantile_prefix)
     return 1 - df.apply(lambda row: compute_cdf_value(row, t, quantile_cols, quantile_levels), axis=1)
 
 def excess_PIT(
-    merged_df: pd.DataFrame,  # pre-merged forecast + oracle, filtered to single model
+    merged_df: pd.DataFrame,
     oracle_col: str,
     t: float,
     randomized: bool = True,
     quantile_prefix: str = "quantile_"
 ) -> pd.Series:
-    
+    """Compute excess PIT values for observations above threshold t.
+
+    Filters to exceedances (y > t), then computes (F(y) - F(t)) / (1 - F(t)).
+    If randomized, uses uniform jittering between F(y-1) and F(y) for discrete data.
+
+    Args:
+        merged_df: Pre-merged forecast + oracle DataFrame, filtered to a single model.
+        oracle_col: Column name of the observed values.
+        t: Exceedance threshold.
+        randomized: If True, apply randomization for discrete distributions.
+        quantile_prefix: Prefix identifying quantile columns.
+    """
     exceedance_df = above_threshold(merged_df, oracle_col, t)
     F_t = threshold_CDF_values(exceedance_df, t, quantile_prefix)
     F_y = empirical_CDF_values(exceedance_df, oracle_col, quantile_prefix)
@@ -98,7 +177,19 @@ def tail_calibration(
     randomized: bool = True,
     quantile_prefix: str = "quantile_"
 ) -> dict[p, TailCalibrationTuple]:
+    """Compute tail calibration diagnostics pooled across all units in id_col.
 
+    For each percentile, computes per-unit thresholds, pools excess PIT values,
+    and returns occurrence ratio, severity function, and combined tail calibration function.
+
+    Args:
+        merged_df: Pre-merged forecast + oracle DataFrame.
+        id_col: Column identifying the unit of analysis (e.g. location).
+        oracle_col: Column name of the observed values.
+        p: Percentile(s) in [0, 100] defining the exceedance threshold.
+        randomized: If True, apply randomization for discrete distributions.
+        quantile_prefix: Prefix identifying quantile columns.
+    """
     if isinstance(p, (int, float)):
         p = [p]
     
@@ -143,7 +234,16 @@ def tail_calibration_by_id(
     randomized: bool = True,
     quantile_prefix: str = "quantile_"
 ) -> dict[str, dict[p, TailCalibrationTuple]]:
+    """Run tail_calibration separately for each unique value in id_col.
 
+    Args:
+        merged_df: Pre-merged forecast + oracle DataFrame.
+        id_col: Column identifying the unit of analysis (e.g. location).
+        oracle_col: Column name of the observed values.
+        p: Percentile(s) in [0, 100] defining the exceedance threshold.
+        randomized: If True, apply randomization for discrete distributions.
+        quantile_prefix: Prefix identifying quantile columns.
+    """
     if isinstance(p, (int, float)):
         p = [p]
 
@@ -170,6 +270,20 @@ def evaluate_models(
     quantile_prefix: str = "quantile_",
     baseline_model: str = "FluSight-baseline",
 ) -> pd.DataFrame:
+    """Evaluate models on WIS and tail calibration metrics (sup/L1 distance).
+
+    Returns a DataFrame with mean WIS, relative WIS, and tail calibration distances
+    at each percentile, sorted by relative WIS against the baseline model.
+
+    Args:
+        evaluation_df: DataFrame with forecast quantile columns, oracle, and a model_id column.
+        id_col: Column identifying the unit of analysis (e.g. location).
+        oracle_col: Column name of the observed values.
+        percentiles: Exceedance percentiles at which to compute tail calibration.
+        u: Grid of values in [0, 1] for evaluating the tail calibration function.
+        quantile_prefix: Prefix identifying quantile columns.
+        baseline_model: Model ID used to normalize WIS scores into relative WIS.
+    """
     import scoringrules as sr
 
     quantile_cols = sorted(

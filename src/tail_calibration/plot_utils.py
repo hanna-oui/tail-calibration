@@ -9,6 +9,12 @@ def plot_tail_calibration(
     ePIT_map: dict[p, TailCalibrationTuple],
     plots: list[str] = ['combined', 'severity', 'occurrence']
 ) -> Figure:
+    """Plot tail calibration curves (combined, severity, and/or occurrence) across percentiles.
+
+    Args:
+        ePIT_map: Output of tail_calibration(); maps percentile -> TailCalibrationTuple.
+        plots: Subset of ['combined', 'severity', 'occurrence'] to include as subplots.
+    """
     t = list(ePIT_map.keys())
     u = np.linspace(0, 1, 1000)
     
@@ -63,6 +69,14 @@ def plot_tail_calibration_by_id(
     u: np.ndarray = np.linspace(0, 1, 100),
     severity_metric: str = "sup",
 ) -> Figure:
+    """Scatter plot of occurrence ratio vs severity distance, one point per unit ID.
+
+    Args:
+        by_id_map: Output of tail_calibration_by_id(); maps unit ID -> ePIT_map.
+        percentile: The percentile threshold to plot.
+        u: Grid of values in [0, 1] for evaluating the severity function.
+        severity_metric: Distance metric for severity: 'sup' (max deviation) or 'l1' (integral).
+    """
     ids = []
     occurrence_ratios = []
     severity_distances = []
@@ -107,6 +121,16 @@ def plot_tail_calibration_by_id_and_horizon(
     u: np.ndarray = np.linspace(0, 1, 100),
     severity_metric: str = "sup",
 ) -> Figure:
+    """Compare tail calibration across two horizons, with arrows connecting matched unit IDs.
+
+    Args:
+        by_id_map_h1: Output of tail_calibration_by_id() for the first horizon.
+        by_id_map_h2: Output of tail_calibration_by_id() for the second horizon.
+        percentile: The percentile threshold to plot.
+        horizons: Display labels for the two horizons, shown in the legend.
+        u: Grid of values in [0, 1] for evaluating the severity function.
+        severity_metric: Distance metric for severity: 'sup' (max deviation) or 'l1' (integral).
+    """
 
     def extract(by_id_map):
         result = {}
@@ -162,6 +186,14 @@ def plot_tail_miscalibration_by_horizon(
     plots: list[str] = ['combined', 'severity', 'occurrence'],
     u: np.ndarray = np.linspace(0, 1, 100),
 ) -> Figure:
+    """Plot tail calibration curves across forecast horizons for a single percentile.
+
+    Args:
+        horizon_maps: Maps horizon integer -> ePIT_map (output of tail_calibration()).
+        percentile: The percentile threshold to plot.
+        plots: Subset of ['combined', 'severity', 'occurrence'] to include as subplots.
+        u: Grid of values in [0, 1] for evaluating calibration functions.
+    """
 
     valid = ['combined', 'severity', 'occurrence']
     for plot_name in plots:
@@ -216,6 +248,12 @@ def plot_wis_vs_tail(
     summary_df: pd.DataFrame,
     metric: str = "tail_sup_85",
 ) -> Figure:
+    """Scatter plot of relative WIS vs a tail calibration distance metric, with Pearson correlation.
+
+    Args:
+        summary_df: Output of evaluate_models(); must contain 'rwis' and the chosen metric column.
+        metric: Column name of the tail calibration metric to plot on the y-axis (e.g. 'tail_sup_85').
+    """
 
     # axis label
     if "sup" in metric:
