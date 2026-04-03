@@ -26,7 +26,7 @@ Epidemiology provides a rich application area to assess tail calibration of fore
 
 <sub> **Figure**: Histogram (left) and Lorenz curve (right) of the weekly incidence of flu hospitalization from September 2023 to March 2026 in the US. </sub>
 
-This reveals that infectious disease presents another environment that can be characterized as both *right-tailed* with *concentration*. The estimated Gini coefficient that the average difference in the weekly incidence of flu hospitalizations is *1.2 times greater* than the average weekly incidence of flu hospitalizations overall.  
+This reveals that infectious disease presents another environment that can be characterized as both *right-tailed* with *concentration*. The estimated Gini coefficient that the average difference in the weekly incidence of flu hospitalizations is over *1.3 times greater* than the average weekly incidence of flu hospitalizations overall.  
 
 How well is the FluSight ensemble calibrated to predicting tail events? It turns out that the model appears to be tail *probabilistically* calibrated when focusing on the 2023-24 and 2024-25 seasons. 
 
