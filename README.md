@@ -2,8 +2,9 @@
 
 This library contains my implementation of the Tail Calibration procedure proposed in [Allen et al. (2025)](https://www.tandfonline.com/doi/full/10.1080/01621459.2025.2506194), *Tail Calibration of Probabilistic Forecasts, Journal of the American Statistical Association (2025)*. Please consult Sam Allen's (primary author of paper) [R implementation](https://github.com/sallen12/TailCalibration). I unfortunately had not come across their repository until after I had completed the implementation presented here.
 
- 
+ <!--
  A presentation I compiled on the topic can be found [here](https://hanna-oui.github.io/assets/tail_calibration_slides.pdf) along with [my personal notes](https://hanna-oui.github.io/assets/tail_calibration_notes.pdf) with some additional derivations. 
+ -->
 
 In its current iteration, this library is built with an application on the FluSight [2023-24](https://www.cdc.gov/flu-forecasting/evaluation/2023-2024-report.html) and [2024-25](https://www.cdc.gov/flu-forecasting/evaluation/2024-2025-report.html) data in mind. A future update would provide a more general purpose library.
 
